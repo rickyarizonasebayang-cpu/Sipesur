@@ -1,0 +1,176 @@
+import 'dotenv/config';
+import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import db from './db.js';
+
+async function main() {
+  const connStr = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+  if (!connStr && (!process.env.DB_HOST || process.env.DB_HOST === 'localhost')) {
+    console.log('\n⚠️  PERHATIAN: DATABASE_URL belum diatur di file backend/.env');
+    console.log('Untuk menghubungkan database ke Supabase:');
+    console.log('1. Buka Dashboard Supabase Anda di https://supabase.com');
+    console.log('2. Masuk ke Project Settings > Database > Connection string > URI');
+    console.log('3. Buka file sipesur/backend/.env dan tempel connection string:');
+    console.log('   DATABASE_URL=postgresql://postgres.xxx:[PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres\n');
+  }
+
+  try {
+    console.log('Menghubungkan ke database PostgreSQL/Supabase...');
+    const schema = fs.readFileSync(new URL('../../database/schema.sql', import.meta.url), 'utf8');
+
+    // Eksekusi skema SQL
+    await db.pool.query(schema);
+    console.log('Skema database berhasil diterapkan ke Supabase/PostgreSQL.');
+
+    const pw = await bcrypt.hash('Password123', 10);
+
+    // Akun Pemerintahan (Petugas, Lurah, Admin) dan Warga
+    const users = [
+      {
+        nama: 'Admin Kelurahan',
+        email: 'admin@sipesur.test',
+        username: 'admin',
+        nip: '198001012005011001',
+        jabatan: 'Administrator Sistem',
+        telepon: '081234567890',
+        role: 'admin',
+        status_verifikasi: 'terverifikasi',
+        must_change_password: 0,
+      },
+      {
+        nama: 'Siti Rohmah, S.AP',
+        email: 'petugas@sipesur.test',
+        username: 'petugas',
+        nip: '198505122010012003',
+        jabatan: 'Petugas Pelayanan Administrasi',
+        telepon: '081234567891',
+        role: 'petugas',
+        status_verifikasi: 'terverifikasi',
+        must_change_password: 0,
+      },
+      {
+        nama: 'Drs. Hadi Purnomo, M.Si',
+        email: 'lurah@sipesur.test',
+        username: 'lurah',
+        nip: '197503151998031004',
+        jabatan: 'Lurah Sukamaju',
+        telepon: '081234567892',
+        role: 'lurah',
+        status_verifikasi: 'terverifikasi',
+        must_change_password: 0,
+      },
+      {
+        nama: 'Budi Santoso',
+        email: 'warga@sipesur.test',
+        username: '3201010101900001',
+        nip: null,
+        jabatan: null,
+        telepon: '081200000001',
+        role: 'warga',
+        status_verifikasi: 'terverifikasi',
+        must_change_password: 0,
+        nik: '3201010101900001',
+        no_kk: '3201010101900002',
+        tempat_lahir: 'Bandung',
+        tanggal_lahir: '1990-01-01',
+        jenis_kelamin: 'L',
+        alamat: 'Jl. Melati No. 5 RT 02/RW 03, Sukamaju',
+        pekerjaan: 'Karyawan Swasta',
+      },
+      {
+        nama: 'Ahmad Pratama',
+        email: 'ahmad.pratama@gmail.com',
+        username: '3201010202950001',
+        nip: null,
+        jabatan: null,
+        telepon: '081200000002',
+        role: 'warga',
+        status_verifikasi: 'menunggu_verifikasi',
+        must_change_password: 0,
+        nik: '3201010202950001',
+        no_kk: '3201010202950002',
+        tempat_lahir: 'Jakarta',
+        tanggal_lahir: '1995-02-02',
+        jenis_kelamin: 'L',
+        alamat: 'Jl. Mawar No. 12 RT 01/RW 04, Sukamaju',
+        pekerjaan: 'Wiraswasta',
+      },
+    ];
+
+    for (const u of users) {
+      const [x] = await db.query(
+        'INSERT INTO users(nama,email,username,nip,jabatan,telepon,password,role,status_verifikasi,must_change_password) VALUES(?,?,?,?,?,?,?,?,?,?)',
+        [
+          u.nama,
+          u.email,
+          u.username,
+          u.nip,
+          u.jabatan,
+          u.telepon,
+          pw,
+          u.role,
+          u.status_verifikasi,
+          u.must_change_password,
+        ]
+      );
+
+      if (u.role === 'warga') {
+        await db.query(
+          'INSERT INTO warga(user_id,nik,no_kk,tempat_lahir,tanggal_lahir,jenis_kelamin,alamat,pekerjaan,telepon) VALUES(?,?,?,?,?,?,?,?,?)',
+          [
+            x.insertId,
+            u.nik,
+            u.no_kk,
+            u.tempat_lahir,
+            u.tanggal_lahir,
+            u.jenis_kelamin,
+            u.alamat,
+            u.pekerjaan,
+            u.telepon,
+          ]
+        );
+      }
+    }
+
+    const P = (s) =>
+      s.split('|').map((x) => {
+        const [name, label] = x.split(':');
+        return { name: name.trim(), label: (label || name).trim() };
+      });
+
+    const RT = 'Surat Pengantar RT/RW';
+    const J = [
+      ['SKD', 'Surat Keterangan Domisili', 'Orang tersebut benar berdomisili di wilayah Kelurahan Sukamaju.', 'alamat_domisili:Alamat Domisili|lama_tinggal:Lama Tinggal|keperluan:Keperluan', ['KTP', 'Kartu Keluarga', RT]],
+      ['SKTM', 'Surat Keterangan Tidak Mampu', 'Orang tersebut benar tergolong keluarga kurang mampu.', 'penghasilan:Penghasilan per Bulan|jumlah_tanggungan:Jumlah Tanggungan|keperluan:Keperluan', ['KTP', 'Kartu Keluarga', RT]],
+      ['SKCK', 'Surat Pengantar SKCK', 'Orang tersebut berkelakuan baik dan diberi pengantar untuk pengurusan SKCK.', 'agama:Agama|status_perkawinan:Status Perkawinan|keperluan:Keperluan', ['KTP', 'Kartu Keluarga', 'Pas Foto']],
+      ['SKU', 'Surat Keterangan Usaha', 'Orang tersebut benar memiliki usaha di wilayah Kelurahan Sukamaju.', 'nama_usaha:Nama Usaha|jenis_usaha:Jenis Usaha|alamat_usaha:Alamat Usaha|lama_usaha:Lama Usaha', ['KTP', 'Foto Tempat Usaha', RT]],
+      ['SKLH', 'Surat Keterangan Kelahiran', 'Telah terjadi kelahiran sebagaimana data di atas.', 'nama_bayi:Nama Bayi|tempat_lahir_bayi:Tempat Lahir Bayi|tanggal_lahir_bayi:Tanggal Lahir Bayi|nama_ayah:Nama Ayah|nama_ibu:Nama Ibu', ['KTP Pelapor', 'Kartu Keluarga', 'Surat Keterangan Lahir (Bidan/RS)']],
+      ['SKM', 'Surat Keterangan Kematian', 'Telah terjadi kematian sebagaimana data di atas.', 'nama_almarhum:Nama Almarhum|nik_almarhum:NIK Almarhum|tanggal_meninggal:Tanggal Meninggal|penyebab:Penyebab|hubungan_pelapor:Hubungan Pelapor', ['KTP Pelapor', 'Kartu Keluarga', 'Surat Keterangan Kematian (RS/RT)']],
+      ['SKBM', 'Surat Keterangan Belum Menikah', 'Orang tersebut sampai saat ini belum pernah menikah.', 'agama:Agama|keperluan:Keperluan', ['KTP', 'Kartu Keluarga', RT]],
+      ['SPP', 'Surat Pengantar Pindah', 'Orang tersebut bermaksud pindah domisili sebagaimana data di atas.', 'alamat_tujuan:Alamat Tujuan|alasan_pindah:Alasan Pindah|jumlah_pengikut:Jumlah Pengikut', ['KTP', 'Kartu Keluarga', 'Pas Foto']],
+    ];
+
+    for (const [k, n, t, f, s] of J) {
+      const [x] = await db.query(
+        'INSERT INTO jenis_surat(kode,nama,template,form_fields) VALUES(?,?,?,?)',
+        [k, n, t, JSON.stringify(P(f))]
+      );
+      for (const p of s) {
+        await db.query('INSERT INTO persyaratan(jenis_surat_id,nama) VALUES(?,?)', [x.insertId, p]);
+      }
+    }
+
+    console.log('\n[V] Database Supabase siap! Akun uji (password: Password123):');
+    users.forEach((u) => {
+      const loginId = u.nip || u.nik || u.username || u.email;
+      console.log(`   - ${u.role.toUpperCase().padEnd(8)}: ID/Login='${loginId}' (${u.nama}) - Status: ${u.status_verifikasi}`);
+    });
+  } catch (err) {
+    console.error('\n[X] Gagal melakukan setup database:', err.message || err);
+    console.error('\nTips: Pastikan DATABASE_URL di file backend/.env sudah benar dan password database sesuai.');
+  } finally {
+    await db.end();
+  }
+}
+
+main();
